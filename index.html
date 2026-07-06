@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mouse Configurator</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖱️</text></svg>">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="appbar">
+    <div class="logo">🖱️</div>
+    <div class="name">Mouse<small>Web configurator</small></div>
+    <div class="conns">
+      <span class="batt-pill hidden" id="battChip">🔋 <span id="battTop">—</span></span>
+      <button class="pill" id="btnHid"><span class="dot"></span>USB</button>
+      <button class="pill" id="btnBle"><span class="dot"></span>Bluetooth</button>
+    </div>
+  </header>
+
+  <div class="callout" id="connCallout">
+    <span><b>Plug the mouse in with a USB cable</b> and click <b>USB</b> to change settings. Bluetooth shows battery only.</span>
+    <button class="btn" id="calloutHid">Connect USB</button>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-pane="overview">Overview</button>
+    <button class="tab" data-pane="dpi">DPI</button>
+    <button class="tab" data-pane="light">Lighting</button>
+    <button class="tab" data-pane="buttons">Buttons</button>
+    <button class="tab" data-pane="macros">Macros</button>
+    <button class="tab" data-pane="advanced">Advanced</button>
+    <button class="tab" data-pane="console">Console</button>
+  </div>
+
+  <!-- OVERVIEW -->
+  <section id="pane-overview" class="tabpane">
+    <div class="cards" style="margin-bottom:18px">
+      <div class="card"><h3>Battery</h3><div class="big"><span id="battValue">—</span><span class="unit"> %</span></div>
+        <canvas id="battSpark" class="spark hidden" width="260" height="42"></canvas></div>
+      <div class="card"><h3>Active DPI stage</h3><div class="big" id="activeStage">—</div>
+        <button class="btn ghost" id="btnReadUsb" style="margin-top:10px">Read active stage</button></div>
+      <div class="card"><h3>Device info</h3><div class="kv" id="deviceInfo"><span class="k">Status</span><span class="v">not connected</span></div></div>
+    </div>
+
+    <div class="panel">
+      <div class="head"><h2>Sync &amp; profiles</h2><div class="desc">Read the mouse's current settings into the app, or save and restore whole configurations. Loading a profile fills the tabs — press each tab's Apply, or <b>Write all</b>, to send it.</div></div>
+      <div class="body">
+        <div class="fieldgrid" style="grid-template-columns:1fr auto auto auto;align-items:end">
+          <label class="field">Saved profiles<select id="profileSel"><option value="">— none —</option></select></label>
+          <button class="btn ghost" id="btnProfLoad">Load into app</button>
+          <button class="btn ghost" id="btnProfSave">Save…</button>
+          <button class="btn ghost" id="btnProfDelete">Delete</button>
+        </div>
+        <div class="row-btns" style="margin-top:14px">
+          <button class="btn" id="btnSyncMouse">⟳ Sync from mouse</button>
+          <button class="btn ghost" id="btnWriteAll">↥ Write all to mouse</button>
+          <button class="btn ghost" id="btnProfExport">Export JSON</button>
+          <button class="btn ghost" id="btnProfImport">Import JSON</button>
+          <input type="file" id="profFile" accept="application/json,.json" class="hidden">
+          <span class="spacer"></span><span class="msg" id="syncMsg"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="notice info">Battery &amp; firmware work over Bluetooth. DPI, lighting, buttons and macros need a USB cable connection. Values marked <span class="beta">beta</span> are best-effort — verify them live on the mouse.</div>
+  </section>
+
+  <!-- DPI -->
+  <section id="pane-dpi" class="tabpane hidden">
+    <div class="panel">
+      <div class="head"><h2>DPI stages</h2><div class="desc">Resolution levels the mouse cycles through. Pick how many are active, which one is default, and each level's value and indicator color.</div></div>
+      <div class="body">
+        <div class="fieldgrid" style="grid-template-columns:180px 1fr;align-items:center;margin-bottom:16px">
+          <label class="field">Active stages<select id="stageCount"></select></label>
+          <label class="field check"><input type="checkbox" id="xyDpi">Independent X / Y sensitivity</label>
+        </div>
+        <div class="stage-head"><span>Default</span><span>Stage</span><span id="dpiColHead">DPI</span><span>Color</span></div>
+        <div id="dpiRows"></div>
+      </div>
+      <div class="foot"><button class="btn" id="btnApplyDpi">Apply DPI</button>
+        <button class="btn ghost" id="btnApplyColors">Apply colors</button><span class="spacer"></span><span class="msg" id="dpiMsg"></span></div>
+    </div>
+  </section>
+
+  <!-- LIGHTING -->
+  <section id="pane-light" class="tabpane hidden">
+    <div class="panel">
+      <div class="head"><h2>Lighting</h2><div class="desc">Choose an effect and tune it. Changes preview on the mouse instantly when applied.</div></div>
+      <div class="body">
+        <div class="fieldgrid">
+          <label class="field">Effect<select id="lightMode"></select></label>
+          <label class="field" id="lightColorWrap">Color<input type="color" id="lightColor" value="#ff0000"></label>
+          <label class="field">Brightness<input type="range" id="lightBri" min="0" max="15" value="8"></label>
+          <label class="field">Speed<input type="range" id="lightSpeed" min="0" max="15" value="8"></label>
+          <label class="field" id="lightDirWrap">Direction <span class="beta">beta</span><select id="lightDir"><option value="">Default</option><option value="0">Forward</option><option value="1">Reverse</option></select></label>
+        </div>
+        <div id="custom7" class="hidden" style="margin-top:18px">
+          <label class="field" style="gap:8px">7 custom colors<div class="swatches" id="custom7Swatches"></div></label>
+        </div>
+      </div>
+      <div class="foot"><button class="btn" id="btnApplyLight">Apply lighting</button><span class="spacer"></span><span class="msg" id="lightMsg"></span></div>
+    </div>
+  </section>
+
+  <!-- BUTTONS -->
+  <section id="pane-buttons" class="tabpane hidden">
+    <div class="panel">
+      <div class="head"><h2>Button assignments</h2><div class="desc">Reassign each physical button. All buttons are written together when you apply.</div></div>
+      <div class="body"><div id="btnRows"></div></div>
+      <div class="foot"><button class="btn" id="btnApplyButtons">Apply</button>
+        <button class="btn ghost" id="btnResetButtons">Reset to defaults</button><span class="spacer"></span><span class="msg" id="btnMsg"></span></div>
+    </div>
+    <div class="panel">
+      <div class="head"><h2>Turbo / rapid-fire</h2><div class="desc">Bind a button to fire a click repeatedly. Count 0 fires continuously while the button is held. The mouse sets the cadence; there's no per-button interval byte in this firmware.</div></div>
+      <div class="body"><div class="fieldgrid" style="grid-template-columns:1fr 1fr 1fr">
+        <label class="field">Button<select id="fireBtn"></select></label>
+        <label class="field">Fire<select id="fireTarget"></select></label>
+        <label class="field">Count (0 = continuous)<input type="number" id="fireCount" min="0" max="255" value="3"></label>
+      </div></div>
+      <div class="foot"><button class="btn" id="btnSetFire">Bind turbo</button><span class="spacer"></span><span class="msg" id="fireMsg"></span></div>
+    </div>
+  </section>
+
+  <!-- MACROS -->
+  <section id="pane-macros" class="tabpane hidden">
+    <div class="panel">
+      <div class="head"><h2>Macro recorder</h2><div class="desc">Record a sequence of key &amp; mouse presses, tweak the timing, then bind it to a button.</div></div>
+      <div class="body">
+        <div class="fieldgrid" style="margin-bottom:14px;grid-template-columns:auto auto 1fr">
+          <button class="btn" id="btnRec">● Record</button>
+          <button class="btn ghost" id="btnClearMacro">Clear</button>
+        </div>
+        <div class="reczone" id="recZone" tabindex="0">Click here, then press keys and mouse buttons to record them.</div>
+        <div class="macrolist" id="macroList"></div>
+        <div class="fieldgrid" style="margin-top:18px">
+          <label class="field">Bind to button<select id="macroBtn"></select></label>
+          <label class="field">Repeat mode<select id="macroLoop">
+            <option value="once">Play once</option><option value="repeat">Repeat N times</option><option value="hold">Repeat while held</option></select></label>
+          <label class="field">Times (repeat mode)<input type="number" id="macroCount" min="1" max="255" value="1"></label>
+        </div>
+      </div>
+      <div class="foot"><button class="btn" id="btnSaveMacro">Save &amp; bind</button><span class="spacer"></span><span class="msg" id="macroMsg"></span></div>
+    </div>
+  </section>
+
+  <!-- ADVANCED -->
+  <section id="pane-advanced" class="tabpane hidden">
+    <div class="panel">
+      <div class="head"><h2>Polling rate</h2><div class="desc">How often the mouse reports its position to the PC. Higher = smoother, more battery use. Wired and wireless rates are stored separately.</div></div>
+      <div class="body"><div class="fieldgrid" style="grid-template-columns:1fr 1fr;max-width:420px">
+        <label class="field">Connection<select id="pollConn"><option value="wired">Wired (USB)</option><option value="wireless">Wireless 2.4G (beta)</option></select></label>
+        <label class="field">Rate<select id="pollRate"></select></label>
+      </div></div>
+      <div class="foot"><button class="btn" id="btnApplyPoll">Apply</button><span class="spacer"></span><span class="msg" id="pollMsg"></span></div>
+    </div>
+    <div class="panel">
+      <div class="head"><h2>Lift-off &amp; motion</h2><div class="desc">Lift-off is the height at which the sensor stops tracking when you raise the mouse.</div></div>
+      <div class="body"><div class="fieldgrid">
+        <label class="field">Lift-off distance<select id="lod"><option value="1">1 mm</option><option value="2">2 mm</option></select></label>
+        <label class="field check"><input type="checkbox" id="angleSnap">Angle snapping</label>
+        <label class="field check"><input type="checkbox" id="motionSync">Motion sync</label>
+        <label class="field">Sleep after (minutes)<input type="number" id="sleepMin" value="5" min="0" max="255"></label>
+        <label class="field">Button debounce (ms)<input type="number" id="debounce" value="0" min="0" max="255"></label>
+      </div></div>
+      <div class="foot"><button class="btn" id="btnApplyLod">Apply lift-off</button>
+        <button class="btn ghost" id="btnApplyMotion">Apply sleep &amp; debounce</button><span class="spacer"></span><span class="msg" id="advMsg"></span></div>
+    </div>
+    <div class="panel">
+      <div class="head"><h2>Factory reset</h2><div class="desc">Restore the mouse's on-board settings to defaults.</div></div>
+      <div class="foot"><button class="btn danger" id="btnFactory">Reset mouse</button><span class="spacer"></span><span class="msg" id="factoryMsg"></span></div>
+    </div>
+  </section>
+
+  <!-- CONSOLE -->
+  <section id="pane-console" class="tabpane hidden">
+    <div class="panel">
+      <div class="head"><h2>USB interface</h2><div class="desc">The mouse's HID collections, shown after you connect over USB.</div></div>
+      <div class="body"><div id="collections"><div class="notice info">No USB device connected.</div></div></div>
+    </div>
+    <div class="panel">
+      <div class="head"><h2>Raw report console</h2><div class="desc">Advanced: send raw command bytes (hex, without the leading report-ID). The checksum is added automatically.</div></div>
+      <div class="body">
+        <input type="text" id="txBytes" placeholder="e.g.  11 00 01" style="margin-bottom:12px">
+        <div class="console" id="console"></div>
+      </div>
+      <div class="foot"><button class="btn" id="btnSend">Send</button><button class="btn ghost" id="btnClear">Clear log</button></div>
+    </div>
+  </section>
+
+  <footer></footer>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
