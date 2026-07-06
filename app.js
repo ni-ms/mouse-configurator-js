@@ -32,7 +32,7 @@ $$('.tab').forEach(t => t.addEventListener('click', () => { openTab(t.dataset.pa
 if (location.hash) openTab(location.hash.slice(1));
 
 /* ================= Bluetooth ================= */
-let bleDevice = null;
+let bleDevice = null, bleConnected = false, bleInfo = [];
 async function connectBle() {
   try {
     bleDevice = await navigator.bluetooth.requestDevice({
@@ -54,18 +54,29 @@ async function readBattery(server) {
   } catch (e) { log('err', 'Battery: ' + e.message); }
 }
 async function readDeviceInfo(server) {
-  const box = $('#deviceInfo'); box.innerHTML = '';
-  let s; try { s = await server.getPrimaryService(P.BLE.deviceInfoService); } catch { return; }
+  bleInfo = [];
+  let s; try { s = await server.getPrimaryService(P.BLE.deviceInfoService); } catch { renderDeviceInfo(); return; }
   const dec = new TextDecoder();
   for (const it of P.BLE.deviceInfo) {
-    try { const c = await s.getCharacteristic(it.uuid); addKv(box, it.label, dec.decode(await c.readValue()).replace(/\0+$/, '') || '—'); } catch {}
+    try { const c = await s.getCharacteristic(it.uuid); bleInfo.push({ label: it.label, value: dec.decode(await c.readValue()).replace(/\0+$/, '') || '—' }); } catch {}
   }
+  renderDeviceInfo();
 }
 function addKv(box, k, v) {
   const a = document.createElement('div'); a.className = 'k'; a.textContent = k;
   const b = document.createElement('div'); b.className = 'v'; b.textContent = v; box.append(a, b);
 }
-function setBle(on) { $('#btnBle').classList.toggle('on', on); if (!on) log('sys', 'Bluetooth disconnected.'); }
+// Device-info box shows the live connection status (USB and/or Bluetooth) plus
+// any Bluetooth device details.
+function renderDeviceInfo() {
+  const box = $('#deviceInfo'); if (!box) return; box.innerHTML = '';
+  const links = [];
+  if (hidDevice) links.push('Wired (USB)');
+  if (bleConnected) links.push('Bluetooth');
+  addKv(box, 'Status', links.length ? 'Connected — ' + links.join(' + ') : 'not connected');
+  for (const it of bleInfo) addKv(box, it.label, it.value);
+}
+function setBle(on) { bleConnected = on; if (!on) { bleInfo = []; log('sys', 'Bluetooth disconnected.'); } $('#btnBle').classList.toggle('on', on); renderDeviceInfo(); }
 function setBattery(p) { $('#battValue').textContent = p; $('#battTop').textContent = p + '%'; $('#battChip').classList.remove('hidden'); pushBatt(p); }
 
 /* ---- live battery sparkline (session history) ---- */
@@ -101,11 +112,19 @@ async function connectHid() {
     setHid(true);
     log('sys', `USB ready: "${dev.productName}" reportId=${cfg.reportId}`);
     describeCollections(dev);
-    await refreshUsbInfo();          // battery + active stage straight over USB
+    // No auto-read on connect. The 0x0e/0x15 read appears to put the config
+    // interface into a state where it then ignores writes, which is very likely
+    // what broke applying. Reads happen only on explicit request now.
   } catch (e) { log('err', 'HID: ' + e.message); }
 }
 function outLen(out) { if (!out || !out.items) return null; let b = 0; for (const it of out.items) b += (it.reportSize || 0) * (it.reportCount || 0); return Math.ceil(b / 8); }
 function findConfig(dev) {
+  // Log every HID interface/collection so we can see if config report-id 0
+  // collides with the plain-mouse interface (composite-device routing issue).
+  (dev.collections || []).forEach((c, i) => {
+    const ids = (a) => (a || []).map(r => r.reportId).join(',') || '-';
+    log('sys', `coll ${i}: usage=0x${hex(c.usagePage, 4)}/0x${hex(c.usage, 2)} out=[${ids(c.outputReports)}] feat=[${ids(c.featureReports)}] in=[${ids(c.inputReports)}]`);
+  });
   const pick = (c) => {
     const out = (c.outputReports || [])[0]; const len = outLen(out);
     if (len && len !== 32) log('sys', `note: output report is ${len} data bytes (expected 32).`);
@@ -124,7 +143,7 @@ function describeCollections(dev) {
     box.appendChild(el);
   });
 }
-function setHid(on) { $('#btnHid').classList.toggle('on', on); $('#connCallout').classList.toggle('hidden', on); }
+function setHid(on) { $('#btnHid').classList.toggle('on', on); $('#connCallout').classList.toggle('hidden', on); renderDeviceInfo(); }
 function onInput(e) {
   const data = new Uint8Array(e.data.buffer);
   const full = new Uint8Array(1 + data.length); full[0] = e.reportId; full.set(data, 1);
@@ -133,6 +152,11 @@ function onInput(e) {
     const idx = data[1] >> 4, cnt = data[1] & 0x0f, dpi = P.rawToDpi(data[2]);
     $('#activeStage').textContent = `Stage ${idx + 1} / ${cnt} · ${dpi} DPI`;
     return;                                        // don't feed notifications to a pending read
+  }
+  if (data[0] === 0xD1) {                          // status report from the mouse (byte[2] ≈ battery %)
+    if (data[2] > 0 && data[2] <= 100) setBattery(data[2]);
+    log('sys', `status 0xD1: battery≈${data[2]}% (raw ${bytesToHex(e.data.buffer).slice(0, 20)})`);
+    return;
   }
   if (pendingInput) { pendingInput(full); pendingInput = null; }
 }
@@ -315,28 +339,33 @@ const applyPoll = () => guard('pollMsg')(() => send(P.setPollingRate(+$('#pollRa
 const applyLod = () => guard('advMsg')(() => send(P.setLiftoff(+$('#lod').value, $('#angleSnap').checked, $('#motionSync').checked), 'setLOD'));
 const applyMotion = () => guard('advMsg')(() => send(P.setMotion({ sleepMinutes: +$('#sleepMin').value || 5, buttonResponseMs: Math.max(0, Math.min(255, +$('#debounce').value || 0)) }), 'setMotion'));
 const factory = () => { if (confirm('Reset the mouse to factory defaults?')) guard('factoryMsg')(() => send(P.factoryReset(), 'factoryReset')); };
-// The mouse reports the active stage as a packed `index<<4 | count` byte (same
-// shape as the live 0xD2 report). A small value is already a raw index; a larger
-// one is packed, so take the high nibble. Always clamp to a real stage.
+// active stage comes back packed as `index<<4 | count` (same as the 0xD2 report):
+// a small value is a raw index, a larger one is packed → take the high nibble.
 function decodeStage(v) {
   const idx = (v < P.MODEL.dpiStages) ? v : (v >> 4);
   return Math.min(Math.max(idx, 0), P.MODEL.dpiStages - 1);
 }
-function setActiveStageLabel(v) { $('#activeStage').textContent = 'Stage ' + (decodeStage(v) + 1); }
-// This firmware answers the two-step request->fetch read (0x0e then 0x15) and
-// ignores the single-shot 0x11/0x13/0x14 reads (they time out). Battery is only
-// available over Bluetooth here.
+// The one read this firmware answers: 0x0e request, then 0x15 fetch.
 async function readActive() {
-  await send(P.readActiveDpiRequest(), 'dpiActive?');   // 0x0e request
+  await send(P.readActiveDpiRequest(), 'dpiActive?');
   await sleep(120);
-  return await sendRead(P.readActiveDpiFetch(), 'dpiActive');   // 0x15 fetch
+  return await sendRead(P.readActiveDpiFetch(), 'dpiActive');
 }
 async function readUsb() {
   try {
     const reply = await readActive();
-    setActiveStageLabel(reply[4]);
+    $('#activeStage').textContent = 'Stage ' + (decodeStage(reply[4]) + 1);
     log('sys', `active stage reply: ${bytesToHex(reply)}`);
   } catch (e) { log('err', 'read: ' + e.message); }
+}
+// Auto-read on connect. Only the active stage reads back here; the full reply is
+// logged in case it carries the DPI table too, so we can expand this later.
+async function autoReadOnConnect() {
+  try {
+    const reply = await readActive();
+    $('#activeStage').textContent = 'Stage ' + (decodeStage(reply[4]) + 1);
+    log('sys', `auto-read on connect (0x15 reply): ${bytesToHex(reply)}`);
+  } catch { log('sys', 'auto-read: mouse did not answer the active-stage read.'); }
 }
 async function consoleSend() {
   try { const d = parseHex($('#txBytes').value); const buf = new Uint8Array(33); buf.set(d.slice(0, 32), 1);
@@ -345,23 +374,35 @@ async function consoleSend() {
 }
 
 /* ================= Sync from mouse ================= */
+async function tryRead(cmd, label) { try { return await sendRead(P.readCmd(cmd), label); } catch (e) { log('err', `${label}: ${e.message}`); return null; } }
+// Battery + active stage from the verified 0x11 info read (works over USB, no BLE needed).
 async function refreshUsbInfo() {
-  try {
-    const reply = await readActive();
-    setActiveStageLabel(reply[4]);
-    log('sys', `active stage reply (0x15): ${bytesToHex(reply)}`);
-  } catch { log('sys', 'active-stage read timed out — firmware may not answer over this link.'); }
+  const info = await tryRead(P.READS.info, 'read info'); if (!info) return;
+  const p = P.parseInfo(info);
+  if (p.batteryPct) setBattery(p.batteryPct);
+  if (Number.isFinite(p.dpiIndex)) $('#activeStage').textContent = 'Stage ' + (p.dpiIndex + 1);
+  log('sys', `info: battery=${p.batteryPct}% activeStage=${p.dpiIndex} sensor=0x${(p.sensor ?? 0).toString(16)}`);
 }
 async function syncFromMouse() {
   if (!hidDevice) { flash('syncMsg', false, 'Connect USB first'); return; }
   try {
-    const reply = await readActive();
-    setActiveStageLabel(reply[4]);
-    log('sys', `sync reply (0x15): ${bytesToHex(reply)}`);
-    // The DPI/color values may live further into this same reply; once its layout
-    // is confirmed from a real dump we can populate the DPI tab from it here.
-    flash('syncMsg', true, `Active stage synced (Stage ${decodeStage(reply[4]) + 1}). Full DPI/colour read-back isn't supported by this firmware's single-shot reads — see the Console dump.`);
-  } catch { flash('syncMsg', false, 'Read timed out — this firmware may not support read-back over this link.'); }
+    let beta = false;
+    const info = await tryRead(P.READS.info, 'read info');            // 0x11
+    if (info) { const p = P.parseInfo(info); if (p.batteryPct) setBattery(p.batteryPct); $('#activeStage').textContent = 'Stage ' + (p.dpiIndex + 1); }
+    const dpiR = await tryRead(P.READS.dpi, 'read dpi');              // 0x13 — best-effort
+    if (dpiR) {
+      const d = P.parseDpiReply(dpiR);
+      if (d.count >= 1 && d.count <= P.MODEL.dpiStages && d.stages[0].x >= P.MODEL.dpiMin && d.stages[0].x <= P.MODEL.dpiMax) {
+        beta = true; stageCount = d.count; xyMode = d.stages.slice(0, d.count).some(s => s.x !== s.y); buildDpi();
+        const rows = $$('.stage');
+        d.stages.forEach((s, i) => { if (!rows[i]) return; rows[i].querySelector('.dpiX').value = s.x; if (xyMode) rows[i].querySelector('.dpiY').value = s.y; });
+        const rb = $(`input[name=activeStage][value="${Math.min(d.activeIndex, stageCount - 1)}"]`); if (rb) rb.checked = true;
+      } else log('sys', 'DPI read didn\'t look like valid stages — left the DPI tab unchanged (see raw dump above).');
+    }
+    const colR = await tryRead(P.READS.dpiColor, 'read colors');     // 0x14 — best-effort
+    if (colR) { const cols = P.parseDpiColorReply(colR); $$('.dpiColor').forEach((el, i) => { if (cols[i]) el.value = toHexColor(cols[i]); }); beta = true; }
+    flash('syncMsg', true, beta ? 'Synced — DPI/colors are best-effort, check the Console' : 'Synced active stage & battery');
+  } catch (e) { flash('syncMsg', false, e.message); }
 }
 
 /* ================= Profiles ================= */
@@ -445,6 +486,9 @@ function profImport(file) {
 window.addEventListener('error', (e) => log('err', 'JS: ' + (e.message || e.error)));
 window.addEventListener('unhandledrejection', (e) => log('err', 'Promise: ' + (e.reason?.message || e.reason)));
 const sup = { hid: 'hid' in navigator, ble: 'bluetooth' in navigator };
+if (sup.hid) navigator.hid.addEventListener('disconnect', (e) => {
+  if (e.device === hidDevice) { hidDevice = null; setHid(false); log('err', 'USB mouse disconnected — reconnect and try again.'); }
+});
 if (!sup.hid) $('#connCallout').innerHTML = '<span><b>Unsupported browser.</b> WebHID isn\'t available — use Chrome, Edge or Opera on desktop.</span>';
 $('#btnBle').onclick = connectBle; $('#btnHid').onclick = connectHid; $('#calloutHid').onclick = connectHid; $('#btnReadUsb').onclick = readUsb;
 $('#btnApplyDpi').onclick = applyDpi; $('#btnApplyColors').onclick = applyColors;

@@ -1,4 +1,4 @@
-# Mouse Web Configurator
+# daWg Slay50 — Web Configurator
 
 A browser-based replacement for the daWg Slay50 mouse software. **Nothing is
 installed on your PC** and **no data leaves your browser** — the page talks to
